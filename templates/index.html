@@ -1,0 +1,164 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Testeur API Mistral</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/prism.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism-tomorrow.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        label {
+            display: block;
+            margin-top: 15px;
+            font-weight: bold;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-height: 100px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .response {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+            white-space: pre-wrap;
+        }
+        .curl-command {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #282c34;
+            border-radius: 4px;
+            overflow-x: auto;
+            color: #abb2bf;
+        }
+        .error {
+            color: red;
+            padding: 10px;
+            border: 1px solid red;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Testeur API Mistral</h1>
+        
+        <label for="systemPrompt">Prompt système :</label>
+        <textarea id="systemPrompt">Tu es un agent de service client sympathique, chaleureux et amical. Tu réponds avec enthousiasme et bonne humeur, tout en restant professionnel.</textarea>
+        
+        <label for="review">Avis client :</label>
+        <textarea id="review" placeholder="Entrez l'avis client ici...">Tres longue attente ! Je suis déçu !</textarea>
+        
+        <button onclick="generateResponse()">Générer la réponse</button>
+        
+        <div id="error" class="error"></div>
+        
+        <div id="response" class="response" style="display: none;"></div>
+        
+        <div id="curlSection" style="display: none;">
+            <h3>Commande cURL générée :</h3>
+            <pre><code id="curlCommand" class="language-bash"></code></pre>
+        </div>
+    </div>
+
+    <script>
+        function setGenerating(isGenerating) {
+            const button = document.querySelector('button');
+            const responseDiv = document.getElementById('response');
+            
+            if (isGenerating) {
+                button.disabled = true;
+                button.textContent = 'Génération en cours...';
+                responseDiv.style.display = 'block';
+                responseDiv.textContent = 'Génération de la réponse en cours...';
+                responseDiv.style.backgroundColor = '#fff3cd';
+            } else {
+                button.disabled = false;
+                button.textContent = 'Générer la réponse';
+            }
+        }
+
+
+        async function generateResponse() {
+            const systemPrompt = document.getElementById('systemPrompt').value;
+            const review = document.getElementById('review').value;
+            const errorDiv = document.getElementById('error');
+            const responseDiv = document.getElementById('response');
+            const curlSection = document.getElementById('curlSection');
+
+            setGenerating(true);
+            
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        system_prompt: systemPrompt,
+                        review: review
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    responseDiv.textContent = data.response;
+                    responseDiv.style.backgroundColor = '#f9f9f9';
+                    responseDiv.style.display = 'block';
+                    
+                    document.getElementById('curlCommand').textContent = data.curl_command;
+                    curlSection.style.display = 'block';
+                    Prism.highlightAll();
+                    
+                    errorDiv.style.display = 'none';
+                } else {
+                    errorDiv.textContent = data.message;
+                    errorDiv.style.display = 'block';
+                    responseDiv.style.display = 'none';
+                    curlSection.style.display = 'none';
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Erreur lors de la communication avec le serveur';
+                errorDiv.style.display = 'block';
+                responseDiv.style.display = 'none';
+                curlSection.style.display = 'none';
+            }
+            setGenerating(false);
+        }
+    </script>
+</body>
+</html>
