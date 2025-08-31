@@ -1,5 +1,7 @@
 # FAQ – Application de Modération d'Avis Clients
 
+**Dernière mise à jour : 31 Août 2025**
+
 ---
 
 ## 1. Comment lancer l'application de modération ?
@@ -82,7 +84,8 @@ L'application propose une interface Streamlit permettant :
 
 ## 4. Comment fonctionne la gestion des mots interdits ?
 
-- Une liste de mots interdits est stockée dans un fichier texte (`mots_interdits.txt`) côté backend.
+- Une liste de **320+ mots interdits** est stockée dans un fichier texte (`mots_interdits.txt`) côté backend.
+- Cette liste enrichie inclut : insultes courantes, termes vulgaires, expressions composées, abréviations (fdp, ntm, etc.), termes discriminatoires, et variantes orthographiques.
 - L'interface permet d'ajouter ou de supprimer des mots via l'API.
 - Lors de la modération, si l'API laisse passer un mot problématique, ce filtre de mots interdits agit en filet de sécurité pour censurer ou remplacer ces mots dans le texte modéré.
 - Cette logique de double vérification (IA + mots interdits) garantit une modération plus robuste.
@@ -156,4 +159,46 @@ Dans l'exemple, même avec un seuil à 1.0, le flag `hate_and_discrimination` es
 
 **En résumé :**
 - Un seuil élevé rend la modération plus permissive, mais certains contenus très problématiques seront toujours modérés si l'API les détecte clairement.
-- Si vous souhaitez un contrôle total, demandez à un développeur d'adapter la logique backend selon vos besoins métier. 
+- Si vous souhaitez un contrôle total, demandez à un développeur d'adapter la logique backend selon vos besoins métier.
+
+---
+
+## 9. Comment fonctionne la détection des noms propres ?
+
+### Détection étendue (mise à jour du 31 Août 2025)
+
+Le système détecte et anonymise automatiquement les noms de personnes mentionnés avec des titres. La liste des titres reconnus a été considérablement étendue :
+
+**Titres médicaux et académiques :**
+- Dr, Docteur, Pr, Professeur, Prof
+
+**Titres professionnels médicaux :**
+- Médecin, Infirmier, Infirmière, Chirurgien, Chirurgienne
+- Pharmacien, Pharmacienne, Kinésithérapeute, Kiné
+- Aide-soignant, Aide-soignante, Sage-femme
+
+**Civilités :**
+- Monsieur, Madame, Mademoiselle
+- M., Mr., Mme., Mlle., Me. (avec ou sans point)
+
+**Autres titres professionnels :**
+- Maître, Maitre, Directeur, Directrice
+- Responsable, Chef
+
+### Exemples de détection :
+- "Dr Dupont" → "Dr *****"
+- "Monsieur Leblanc" → "Monsieur *****"
+- "L'infirmière Sophie" → "L'infirmière *****"
+- "Le médecin Durand" → "Le médecin *****"
+
+Cette fonctionnalité protège automatiquement l'identité des personnes mentionnées dans les avis.
+
+---
+
+## 10. Comment voir la dernière mise à jour de l'application ?
+
+L'interface Streamlit affiche en haut à droite un badge vert avec la date et l'heure de la dernière mise à jour du code :
+
+**✓ Last update : 31 Août 2025 - 14h32**
+
+Cette date est fixe et correspond à la dernière modification du code de l'application (et non au rafraîchissement de la page). Elle permet de vérifier que vous utilisez bien la dernière version de l'application. 

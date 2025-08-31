@@ -1,15 +1,19 @@
 # Mode opératoire - Intégration du système de modération d'avis clients avec Mistral AI (Version 2)
 
-## 🆕 Nouveautés de la Version 2
+**Dernière mise à jour : 31 Août 2025**
+
+## 🆕 Nouveautés de la Version 2 (Mise à jour 31 Août 2025)
 
 Cette version 2 apporte des améliorations majeures pour NodeJS :
 
 - **🤖 API Mistral comme filtre principal** : L'IA gère maintenant 90% de la modération
-- **📚 Dictionnaire comme filet de sécurité** : Les mots interdits gèrent les 10% restants
+- **📚 Dictionnaire enrichi** : 320+ mots interdits (contre 9 initialement) comme filet de sécurité
+- **👤 Détection étendue des noms propres** : Reconnaissance de 30+ titres professionnels et civilités
 - **🔍 Détection intelligente des sources** : Traçabilité complète de la modération
 - **⚡ Gestion avancée des mots** : Auto-détection et ajout des mots manqués par l'IA
 - **🎯 Seuil optimisé** : Par défaut à 1.0 pour éviter la sur-modération
 - **🚀 Intégration moderne** : Support React, Vue, Express avec exemples complets
+- **📅 Indicateur de version** : Affichage de la date de dernière mise à jour du code
 
 ## Introduction
 
@@ -50,9 +54,12 @@ Le système de modération Version 2 se compose des éléments suivants :
    - Modération systématique indépendante de l'IA
    - Gestion dynamique via API REST
 
-3. **👤 Détection de noms propres**
+3. **👤 Détection étendue de noms propres (30+ titres reconnus)**
    - Protection automatique de l'identité
    - Anonymisation des titres + noms (Dr Durant → Dr *****)
+   - Titres médicaux : Médecin, Infirmier, Chirurgien, Pharmacien, etc.
+   - Civilités : Monsieur, Madame, M., Mr., Mme., etc.
+   - Titres professionnels : Directeur, Responsable, Chef, Maître, etc.
 
 4. **🔍 Système de traçabilité**
    - Identification précise des sources de modération
@@ -414,8 +421,21 @@ async function moderateText(text, moderationThreshold = DEFAULT_MODERATION_THRES
     moderatedText = moderatedText.replace(regex, replacement);
   }
   
-  // Détection des noms propres (simplifiée)
-  const titles = ["Dr", "Docteur", "Pr", "Professeur", "M.", "Mme", "Mlle"];
+  // Détection étendue des noms propres (mise à jour 31 Août 2025)
+  const titles = [
+    // Titres médicaux et académiques
+    "Dr", "Docteur", "Pr", "Professeur", "Prof",
+    // Titres professionnels médicaux
+    "Médecin", "Infirmier", "Infirmière", "Chirurgien", "Chirurgienne",
+    "Pharmacien", "Pharmacienne", "Kinésithérapeute", "Kiné",
+    "Aide-soignant", "Aide-soignante", "Sage-femme",
+    // Civilités
+    "Monsieur", "Madame", "Mademoiselle",
+    "M.", "Mr.", "Mme.", "Mlle.", "Me.",
+    // Autres titres professionnels
+    "Maître", "Maitre", "Directeur", "Directrice",
+    "Responsable", "Chef"
+  ];
   for (const title of titles) {
     const pattern = new RegExp(`(${title}\\s+)([A-Z][a-zéèêëàâäôöûüç]+)`, 'g');
     moderatedText = moderatedText.replace(pattern, '$1*****');
@@ -658,14 +678,23 @@ module.exports = router;
 }
 ```
 
-### 8. Créez le fichier mots_interdits.txt initial
+### 8. Créez le fichier mots_interdits.txt enrichi
 
-À la racine du projet, créez le fichier `mots_interdits.txt` avec le contenu suivant :
+À la racine du projet, créez le fichier `mots_interdits.txt`. Ce fichier contient maintenant **320+ mots interdits** incluant :
+- Insultes courantes et leurs variantes
+- Termes vulgaires et sexuels  
+- Expressions composées (fils de pute, va te faire, etc.)
+- Abréviations (fdp, ntm, tg, vtf, etc.)
+- Termes discriminatoires
+- Variantes orthographiques
 
+Exemple de contenu (version complète disponible dans le projet) :
 ```
 merde
 putain
 con
+connard
+connasse
 pute
 salope
 enculé
@@ -675,6 +704,9 @@ nique
 foutre
 encule
 trou du cul
+fdp
+ntm
+[... 300+ autres mots ...]
 ```
 
 ## Utilisation de l'API de modération
@@ -1244,9 +1276,22 @@ async function moderateText(text, moderationThreshold = DEFAULT_MODERATION_THRES
     moderationDetails.sources.push('Dictionnaire de mots interdits');
   }
   
-  // ÉTAPE 3: Détection des noms propres
+  // ÉTAPE 3: Détection étendue des noms propres (mise à jour 31 Août 2025)
   const textBeforeNames = moderatedText;
-  const titles = ["Dr", "Docteur", "Pr", "Professeur", "M.", "Mme", "Mlle"];
+  const titles = [
+    // Titres médicaux et académiques
+    "Dr", "Docteur", "Pr", "Professeur", "Prof",
+    // Titres professionnels médicaux
+    "Médecin", "Infirmier", "Infirmière", "Chirurgien", "Chirurgienne",
+    "Pharmacien", "Pharmacienne", "Kinésithérapeute", "Kiné",
+    "Aide-soignant", "Aide-soignante", "Sage-femme",
+    // Civilités
+    "Monsieur", "Madame", "Mademoiselle",
+    "M.", "Mr.", "Mme.", "Mlle.", "Me.",
+    // Autres titres professionnels
+    "Maître", "Maitre", "Directeur", "Directrice",
+    "Responsable", "Chef"
+  ];
   
   for (const title of titles) {
     const pattern = new RegExp(`(${title}\\s+)([A-Z][a-zéèêëàâäôöûüç]+)`, 'g');
@@ -1440,15 +1485,35 @@ document.getElementById('review-form').addEventListener('submit', async (e) => {
 });
 ```
 
+## Indicateur de version dans l'interface
+
+Si vous créez une interface web pour la gestion de la modération, pensez à ajouter un indicateur de version visible :
+
+```javascript
+// Constante de version à mettre à jour manuellement
+const LAST_UPDATE = "31 Août 2025 - 14h32";
+
+// Affichage dans votre interface HTML
+document.getElementById('version-badge').innerHTML = `
+  <span style="background-color: #28a745; color: white; padding: 5px 10px; border-radius: 5px;">
+    ✓ Last update : ${LAST_UPDATE}
+  </span>
+`;
+```
+
+Cette fonctionnalité permet aux utilisateurs de vérifier qu'ils utilisent bien la dernière version du système de modération.
+
 ## Conclusion
 
 Cette implémentation NodeJS Version 2 du service de modération vous permet d'intégrer facilement et efficacement l'API Mistral AI avec une logique de modération intelligente et traçable. Elle offre :
 
 - **🤖 Modération IA avancée** : 90% de la modération gérée intelligemment
-- **📚 Filet de sécurité robuste** : 10% de protection supplémentaire
+- **📚 Dictionnaire enrichi** : 320+ mots interdits comme filet de sécurité
+- **👤 Détection étendue** : 30+ titres professionnels et civilités reconnus
 - **🔍 Traçabilité complète** : Savoir exactement qui a modéré quoi
 - **⚡ Auto-amélioration** : Détection et ajout des mots manqués
 - **🚀 Intégration moderne** : Compatible avec tous les frameworks actuels
+- **📅 Gestion de version** : Indicateur de dernière mise à jour
 
 Cette version s'intègre parfaitement à votre environnement NodeJS existant tout en offrant une expérience de modération optimisée et intelligente.
 

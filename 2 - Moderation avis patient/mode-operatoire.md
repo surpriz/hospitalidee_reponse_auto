@@ -1,16 +1,20 @@
 # Mode Opératoire - Intégration du Système de Modération d'Avis Clients (Version 2)
 
+**Dernière mise à jour : 31 Août 2025**
+
 http://83.147.36.59:8503/
 
-## 🆕 Nouveautés de la Version 2
+## 🆕 Nouveautés de la Version 2 (Mise à jour 31 Août 2025)
 
 Cette version 2 apporte des améliorations majeures :
 
 - **🤖 API Mistral comme filtre principal** : L'IA gère maintenant 90% de la modération
-- **📚 Dictionnaire comme filet de sécurité** : Les mots interdits gèrent les 10% restants
+- **📚 Dictionnaire enrichi** : 320+ mots interdits (contre 9 initialement) comme filet de sécurité
+- **👤 Détection étendue des noms propres** : Reconnaissance de 30+ titres professionnels et civilités
 - **🔍 Détection intelligente des sources** : Savoir exactement qui a modéré quoi
 - **⚡ Ajout rapide de mots** : Interface pour ajouter facilement les mots manqués par l'IA
 - **🎯 Seuil par défaut optimisé** : Réglé à 1.0 (très permissif) pour éviter la sur-modération
+- **📅 Indicateur de version** : Affichage de la date de dernière mise à jour du code
 
 ## Table des matières
 
@@ -42,8 +46,11 @@ Le système de modération d'avis clients est une solution intelligente qui util
    - Modération systématique indépendamment de l'IA
    - Facilement personnalisable selon vos besoins
 
-3. **👤 Détection de noms propres**
+3. **👤 Détection étendue de noms propres (30+ titres reconnus)**
    - Protection automatique de l'identité (Dr Durant → Dr *****)
+   - Titres médicaux : Médecin, Infirmier, Chirurgien, Pharmacien, etc.
+   - Civilités complètes : Monsieur, Madame, M., Mr., Mme., etc.
+   - Titres professionnels : Directeur, Responsable, Chef, Maître, etc.
    - Fonctionne indépendamment des autres filtres
 
 ### 🎯 Avantages de la Version 2
@@ -104,7 +111,15 @@ Remplacez `votre_clé_api_mistral` par la clé que vous avez obtenue sur la cons
 
 ### 4.2. Vérification du fichier des mots interdits
 
-Le fichier `mots_interdits.txt` contient une liste de mots à modérer automatiquement. Vérifiez son contenu et ajustez-le selon vos besoins. Un mot par ligne.
+Le fichier `mots_interdits.txt` contient une liste enrichie de **320+ mots interdits** à modérer automatiquement, incluant :
+- Insultes courantes et leurs variantes
+- Termes vulgaires et sexuels
+- Expressions composées (fils de pute, va te faire, etc.)
+- Abréviations (fdp, ntm, tg, vtf, etc.)
+- Termes discriminatoires
+- Variantes orthographiques
+
+Vérifiez son contenu et ajustez-le selon vos besoins. Un mot par ligne.
 
 ## 5. Utilisation de l'API de modération
 
@@ -713,7 +728,22 @@ tail -f moderation.log
 - L'appel à l'API Mistral peut prendre quelques secondes
 - Envisagez de mettre en cache les résultats de modération pour les textes fréquents
 
-## 10. FAQ
+## 10. Interface Streamlit - Indicateur de version
+
+L'interface Streamlit affiche désormais en haut à droite un badge vert avec la date et l'heure de la dernière mise à jour du code :
+
+**✓ Last update : 31 Août 2025 - 14h32**
+
+Cette date est définie dans le fichier `streamlit_moderation.py` (ligne 109) :
+
+```python
+# Date et heure de dernière mise à jour du code (à modifier manuellement lors des mises à jour)
+LAST_UPDATE = "31 Août 2025 - 14h32"
+```
+
+Cette fonctionnalité permet aux utilisateurs de vérifier qu'ils utilisent bien la dernière version de l'application.
+
+## 11. FAQ
 
 **Q : Puis-je utiliser le système de modération sans l'API Mistral ?**  
 R : Oui, mais uniquement avec la modération par liste de mots interdits. Il faudra modifier le code pour désactiver les appels à l'API Mistral.

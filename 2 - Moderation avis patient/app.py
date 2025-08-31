@@ -218,26 +218,59 @@ def moderate_text(text, moderation_threshold=DEFAULT_MODERATION_THRESHOLD):
     
     # Détection des noms propres (améliorée)
     # Pour une détection plus précise, un modèle NLP serait nécessaire
-    titles = ["Dr", "Docteur", "Pr", "Professeur", "M.", "Mme", "Mlle"]
+    titles = [
+        # Titres médicaux et académiques
+        "Dr", "Docteur", "Pr", "Professeur", "Prof",
+        # Titres professionnels médicaux
+        "Médecin", "Infirmier", "Infirmière", "Chirurgien", "Chirurgienne",
+        "Pharmacien", "Pharmacienne", "Kinésithérapeute", "Kiné",
+        "Aide-soignant", "Aide-soignante", "Sage-femme", "Sage femme",
+        # Civilités complètes
+        "Monsieur", "Madame", "Mademoiselle",
+        # Civilités abrégées avec et sans point
+        "M\\.?", "Mr\\.?", "Mme\\.?", "Mlle\\.?", "Me\\.?",
+        # Autres titres professionnels
+        "Maître", "Maitre", "Directeur", "Directrice",
+        "Responsable", "Chef"
+    ]
     text_before_names = moderated_text
     
     # Version améliorée pour prendre en compte les noms en majuscules et minuscules
     for title in titles:
-        # Format standard - mot commençant par une majuscule
-        pattern_standard = f"({title}\\s+)([A-Z][a-zéèêëàâäôöûüç]+)"
-        matches = re.findall(pattern_standard, moderated_text)
-        if matches:
-            for match in matches:
-                moderation_details['proper_names_applied'].append(f"{match[0]}{match[1]}")
-        moderated_text = re.sub(pattern_standard, r"\1*****", moderated_text)
-        
-        # Format tout en majuscules
-        pattern_majuscules = f"({title}\\s+)([A-Z][A-ZÉÈÊËÀÂÄÔÖÛÜÇ]+)"
-        matches = re.findall(pattern_majuscules, moderated_text)
-        if matches:
-            for match in matches:
-                moderation_details['proper_names_applied'].append(f"{match[0]}{match[1]}")
-        moderated_text = re.sub(pattern_majuscules, r"\1*****", moderated_text)
+        # Pour les titres avec regex (ceux avec \\.?)
+        if "\\.?" in title:
+            # Format standard - mot commençant par une majuscule (avec support des traits d'union)
+            pattern_standard = f"\\b({title}\\s+)([A-Z][a-zéèêëàâäôöûüç-]+)"
+            matches = re.findall(pattern_standard, moderated_text, flags=re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    moderation_details['proper_names_applied'].append(f"{match[0]}{match[1]}")
+            moderated_text = re.sub(pattern_standard, r"\1*****", moderated_text, flags=re.IGNORECASE)
+            
+            # Format tout en majuscules
+            pattern_majuscules = f"\\b({title}\\s+)([A-Z][A-ZÉÈÊËÀÂÄÔÖÛÜÇ]+)"
+            matches = re.findall(pattern_majuscules, moderated_text, flags=re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    moderation_details['proper_names_applied'].append(f"{match[0]}{match[1]}")
+            moderated_text = re.sub(pattern_majuscules, r"\1*****", moderated_text, flags=re.IGNORECASE)
+        else:
+            # Pour les titres normaux, on fait une recherche insensible à la casse
+            # Format standard - mot commençant par une majuscule (avec support des traits d'union)
+            pattern_standard = f"\\b({re.escape(title)}\\s+)([A-Z][a-zéèêëàâäôöûüç-]+)"
+            matches = re.findall(pattern_standard, moderated_text, flags=re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    moderation_details['proper_names_applied'].append(f"{match[0]}{match[1]}")
+            moderated_text = re.sub(pattern_standard, r"\1*****", moderated_text, flags=re.IGNORECASE)
+            
+            # Format tout en majuscules
+            pattern_majuscules = f"\\b({re.escape(title)}\\s+)([A-Z][A-ZÉÈÊËÀÂÄÔÖÛÜÇ]+)"
+            matches = re.findall(pattern_majuscules, moderated_text, flags=re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    moderation_details['proper_names_applied'].append(f"{match[0]}{match[1]}")
+            moderated_text = re.sub(pattern_majuscules, r"\1*****", moderated_text, flags=re.IGNORECASE)
     
     # Vérifier si la détection de noms propres a modifié le texte
     if text_before_names != moderated_text:

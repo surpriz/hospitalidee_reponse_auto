@@ -91,6 +91,25 @@ def get_forbidden_words():
 
 # Titre de l'application
 st.title("🔍 Modération d'avis clients")
+
+# Date et heure de dernière mise à jour du code (à modifier manuellement lors des mises à jour)
+# Format : "Jour Mois Année - HHhMM"
+LAST_UPDATE = "31 Août 2025 - 14h32"
+
+# Afficher avec un badge de mise à jour
+col_title, col_update = st.columns([3, 1])
+with col_update:
+    st.markdown(
+        f"""
+        <div style="text-align: right; padding: 10px 0;">
+            <span style="background-color: #28a745; color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px;">
+                ✓ Last update : {LAST_UPDATE}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 st.markdown("---")
 
 # Créer deux colonnes principales
