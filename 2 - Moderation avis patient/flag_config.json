@@ -1,0 +1,16 @@
+{
+    "flag_thresholds": {
+        "mistral_api_score_threshold": 0.3,
+        "forbidden_words_trigger_red": true,
+        "proper_names_trigger_red": true,
+        "text_modification_trigger_red": true
+    },
+    "description": {
+        "mistral_api_score_threshold": "Si le score max de l'API Mistral dépasse ce seuil, flag RED (0.0-1.0)",
+        "forbidden_words_trigger_red": "Si des mots interdits sont détectés, flag RED",
+        "proper_names_trigger_red": "Si des noms propres sont détectés, flag RED",
+        "text_modification_trigger_red": "Si le texte a été modifié, flag RED"
+    },
+    "version": "1.0",
+    "last_updated": "2025-08-31"
+}

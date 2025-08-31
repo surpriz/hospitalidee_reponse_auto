@@ -1,8 +1,8 @@
 # Mode opératoire - Intégration du système de modération d'avis clients avec Mistral AI (Version 2)
 
-**Dernière mise à jour : 31 Août 2025**
+**Dernière mise à jour : 31 Août 2025 - 17h51**
 
-## 🆕 Nouveautés de la Version 2 (Mise à jour 31 Août 2025)
+## 🆕 Nouveautés de la Version 2 (Mise à jour 31 Août 2025 - 17h51)
 
 Cette version 2 apporte des améliorations majeures pour NodeJS :
 
@@ -13,6 +13,8 @@ Cette version 2 apporte des améliorations majeures pour NodeJS :
 - **⚡ Gestion avancée des mots** : Auto-détection et ajout des mots manqués par l'IA
 - **🎯 Seuil optimisé** : Par défaut à 1.0 pour éviter la sur-modération
 - **🚀 Intégration moderne** : Support React, Vue, Express avec exemples complets
+- **🔴🟢 Système de flags automatiques** : Classification RED/GREEN pour optimiser le workflow
+- **⚙️ Configuration dynamique** : Seuils ajustables via API et interface
 - **📅 Indicateur de version** : Affichage de la date de dernière mise à jour du code
 
 ## Introduction
@@ -65,6 +67,12 @@ Le système de modération Version 2 se compose des éléments suivants :
    - Identification précise des sources de modération
    - Détection automatique des mots non modérés
    - Interface d'amélioration continue
+
+5. **🔴🟢 Système de flags automatiques**
+   - Classification RED (vérification humaine requise)
+   - Classification GREEN (publication automatique possible)
+   - Critères configurables et seuils ajustables
+   - Optimisation du workflow de modération
 
 ### 🎯 Avantages Version 2
 
@@ -295,6 +303,132 @@ const { FORBIDDEN_WORDS } = require('../utils/forbidden-words');
 // Seuil de modération par défaut
 const DEFAULT_MODERATION_THRESHOLD = 0.5;
 
+// Fichier de configuration des flags
+const FLAG_CONFIG_FILE = path.join(__dirname, '../../flag_config.json');
+
+// Configuration par défaut des flags
+const DEFAULT_FLAG_CONFIG = {
+  mistral_api_score_threshold: 0.3,
+  forbidden_words_trigger_red: true,
+  proper_names_trigger_red: true,
+  text_modification_trigger_red: true
+};
+
+/**
+ * Charge la configuration des flags depuis le fichier
+ */
+function loadFlagConfig() {
+  try {
+    if (fs.existsSync(FLAG_CONFIG_FILE)) {
+      const content = fs.readFileSync(FLAG_CONFIG_FILE, 'utf-8');
+      const config = JSON.parse(content);
+      return config.flag_thresholds || DEFAULT_FLAG_CONFIG;
+    } else {
+      // Créer le fichier avec la configuration par défaut
+      const fullConfig = {
+        flag_thresholds: DEFAULT_FLAG_CONFIG,
+        description: {
+          mistral_api_score_threshold: "Si le score max de l'API Mistral dépasse ce seuil, flag RED (0.0-1.0)",
+          forbidden_words_trigger_red: "Si des mots interdits sont détectés, flag RED",
+          proper_names_trigger_red: "Si des noms propres sont détectés, flag RED",
+          text_modification_trigger_red: "Si le texte a été modifié, flag RED"
+        },
+        version: "1.0",
+        last_updated: new Date().toISOString().split('T')[0]
+      };
+      
+      fs.writeFileSync(FLAG_CONFIG_FILE, JSON.stringify(fullConfig, null, 2), 'utf-8');
+      return DEFAULT_FLAG_CONFIG;
+    }
+  } catch (error) {
+    logger.error(`Erreur lors du chargement de la configuration des flags: ${error.message}`);
+    return DEFAULT_FLAG_CONFIG;
+  }
+}
+
+/**
+ * Sauvegarde la configuration des flags
+ */
+function saveFlagConfig(flagConfig) {
+  try {
+    const fullConfig = {
+      flag_thresholds: flagConfig,
+      description: {
+        mistral_api_score_threshold: "Si le score max de l'API Mistral dépasse ce seuil, flag RED (0.0-1.0)",
+        forbidden_words_trigger_red: "Si des mots interdits sont détectés, flag RED",
+        proper_names_trigger_red: "Si des noms propres sont détectés, flag RED",
+        text_modification_trigger_red: "Si le texte a été modifié, flag RED"
+      },
+      version: "1.0",
+      last_updated: new Date().toISOString().split('T')[0]
+    };
+    
+    fs.writeFileSync(FLAG_CONFIG_FILE, JSON.stringify(fullConfig, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    logger.error(`Erreur lors de la sauvegarde de la configuration des flags: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Détermine le flag RED/GREEN pour un texte modéré
+ */
+function determineFlag(apiResult, moderationDetails, originalText, moderatedText, flagConfig) {
+  const reasons = [];
+  
+  // 1. Vérifier le score de l'API Mistral
+  const mistralThreshold = flagConfig.mistral_api_score_threshold || 0.3;
+  let maxScore = 0.0;
+  
+  if (apiResult.results && apiResult.results.length > 0) {
+    const categoryScores = apiResult.results[0].category_scores || {};
+    if (Object.keys(categoryScores).length > 0) {
+      maxScore = Math.max(...Object.values(categoryScores));
+      
+      if (maxScore >= mistralThreshold) {
+        reasons.push(`Score API Mistral élevé (${maxScore.toFixed(3)} >= ${mistralThreshold})`);
+      }
+    }
+  }
+  
+  // 2. Vérifier les mots interdits
+  if (flagConfig.forbidden_words_trigger_red) {
+    if (moderationDetails.forbidden_words_applied || moderationDetails.mistral_api_applied) {
+      const forbiddenCount = (moderationDetails.forbidden_words_applied || []).length + 
+                            (moderationDetails.mistral_api_applied || []).length;
+      if (forbiddenCount > 0) {
+        reasons.push(`Mots interdits détectés (${forbiddenCount} mot(s))`);
+      }
+    }
+  }
+  
+  // 3. Vérifier les noms propres (RGPD)
+  if (flagConfig.proper_names_trigger_red) {
+    if (moderationDetails.proper_names_applied && moderationDetails.proper_names_applied.length > 0) {
+      const namesCount = moderationDetails.proper_names_applied.length;
+      reasons.push(`Noms propres détectés (${namesCount} nom(s)) - RGPD`);
+    }
+  }
+  
+  // 4. Vérifier si le texte a été modifié
+  if (flagConfig.text_modification_trigger_red) {
+    if (originalText !== moderatedText) {
+      reasons.push("Texte modifié pendant la modération");
+    }
+  }
+  
+  // Déterminer le flag final
+  if (reasons.length > 0) {
+    return { flag: 'RED', reasons };
+  } else {
+    return { flag: 'GREEN', reasons: ['Aucun problème détecté'] };
+  }
+}
+
+// Charger la configuration au démarrage
+let FLAG_CONFIG = loadFlagConfig();
+
 /**
  * Vérifie si le texte doit être modéré via l'API Mistral
  */
@@ -352,7 +486,7 @@ async function checkModerationApi(text, threshold = DEFAULT_MODERATION_THRESHOLD
 }
 
 /**
- * Modère le texte en remplaçant les mots interdits
+ * Modère le texte avec système de flags (Version 2)
  */
 async function moderateText(text, moderationThreshold = DEFAULT_MODERATION_THRESHOLD) {
   // Vérifier via l'API Mistral
@@ -360,6 +494,14 @@ async function moderateText(text, moderationThreshold = DEFAULT_MODERATION_THRES
   
   // Créer une copie du texte pour la modération
   let moderatedText = text;
+  
+  // Tracker les sources de modération
+  const moderationDetails = {
+    forbidden_words_applied: [],
+    mistral_api_applied: [],
+    proper_names_applied: [],
+    sources: []
+  };
   
   // Extraire les mots à partir de contenus détectés par l'API Mistral
   const additionalWordsToModerate = [];
@@ -407,11 +549,33 @@ async function moderateText(text, moderationThreshold = DEFAULT_MODERATION_THRES
     }
   }
   
-  // Appliquer le dictionnaire de mots interdits
-  for (const [word, replacement] of Object.entries(FORBIDDEN_WORDS)) {
-    // Utilise une regex pour trouver le mot entier avec différentes casses
+  // ÉTAPE 1: API Mistral (filtre principal - 90%)
+  const textBeforeApi = moderatedText;
+  for (const word of additionalWordsToModerate) {
+    const replacement = '*'.repeat(word.length);
     const regex = new RegExp('\\b' + word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b', 'gi');
-    moderatedText = moderatedText.replace(regex, replacement);
+    if (regex.test(moderatedText)) {
+      moderatedText = moderatedText.replace(regex, replacement);
+      moderationDetails.mistral_api_applied.push(word);
+    }
+  }
+  
+  if (textBeforeApi !== moderatedText) {
+    moderationDetails.sources.push('API Mistral');
+  }
+  
+  // ÉTAPE 2: Dictionnaire de mots interdits (filet de sécurité - 10%)
+  const textBeforeForbidden = moderatedText;
+  for (const [word, replacement] of Object.entries(FORBIDDEN_WORDS)) {
+    const regex = new RegExp('\\b' + word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b', 'gi');
+    if (regex.test(moderatedText)) {
+      moderatedText = moderatedText.replace(regex, replacement);
+      moderationDetails.forbidden_words_applied.push(word);
+    }
+  }
+  
+  if (textBeforeForbidden !== moderatedText) {
+    moderationDetails.sources.push('Dictionnaire de mots interdits');
   }
   
   // Appliquer la modération pour les mots additionnels détectés par l'API
@@ -421,7 +585,8 @@ async function moderateText(text, moderationThreshold = DEFAULT_MODERATION_THRES
     moderatedText = moderatedText.replace(regex, replacement);
   }
   
-  // Détection étendue des noms propres (mise à jour 31 Août 2025)
+  // ÉTAPE 3: Détection étendue des noms propres (mise à jour 31 Août 2025)
+  const textBeforeNames = moderatedText;
   const titles = [
     // Titres médicaux et académiques
     "Dr", "Docteur", "Pr", "Professeur", "Prof",
@@ -436,12 +601,27 @@ async function moderateText(text, moderationThreshold = DEFAULT_MODERATION_THRES
     "Maître", "Maitre", "Directeur", "Directrice",
     "Responsable", "Chef"
   ];
+  
   for (const title of titles) {
     const pattern = new RegExp(`(${title}\\s+)([A-Z][a-zéèêëàâäôöûüç]+)`, 'g');
-    moderatedText = moderatedText.replace(pattern, '$1*****');
+    const matches = [...moderatedText.matchAll(pattern)];
+    
+    if (matches.length > 0) {
+      matches.forEach(match => {
+        moderationDetails.proper_names_applied.push(`${match[1]}${match[2]}`);
+      });
+      moderatedText = moderatedText.replace(pattern, '$1*****');
+    }
   }
   
-  return { moderatedText, result };
+  if (textBeforeNames !== moderatedText) {
+    moderationDetails.sources.push('Détection de noms propres');
+  }
+  
+  // Déterminer le flag RED/GREEN
+  const { flag, reasons } = determineFlag(result, moderationDetails, text, moderatedText, FLAG_CONFIG);
+  
+  return { moderatedText, result, moderationDetails, flag, flagReasons: reasons };
 }
 
 module.exports = {
@@ -485,7 +665,7 @@ router.post('/moderate', async (req, res) => {
       ? Math.max(0.1, Math.min(1.0, parseFloat(moderation_threshold)))
       : DEFAULT_MODERATION_THRESHOLD;
     
-    const { moderatedText, result } = await moderateText(text, threshold);
+    const { moderatedText, result, moderationDetails, flag, flagReasons } = await moderateText(text, threshold);
     
     // Si le texte a été modifié, c'est qu'il y a eu modération
     const isModerated = moderatedText !== text;
@@ -496,7 +676,10 @@ router.post('/moderate', async (req, res) => {
       moderated_text: moderatedText,
       is_moderated: isModerated,
       moderation_threshold: threshold,
-      api_result: result
+      api_result: result,
+      moderation_details: moderationDetails,
+      flag: flag,
+      flag_reasons: flagReasons
     });
   } catch (error) {
     logger.error(`Erreur lors de la modération: ${error.message}`);
@@ -579,6 +762,81 @@ router.get('/forbidden_words', (req, res) => {
     });
   } catch (error) {
     logger.error(`Erreur lors de la récupération des mots interdits: ${error.message}`);
+    return res.status(500).json({
+      status: 'error',
+      message: `Erreur serveur: ${error.message}`
+    });
+  }
+});
+
+/**
+ * Récupérer la configuration des flags
+ * GET /get_flag_config
+ */
+router.get('/get_flag_config', (req, res) => {
+  try {
+    const currentConfig = loadFlagConfig();
+    
+    return res.json({
+      status: 'success',
+      flag_config: currentConfig
+    });
+  } catch (error) {
+    logger.error(`Erreur lors de la récupération de la configuration des flags: ${error.message}`);
+    return res.status(500).json({
+      status: 'error',
+      message: `Erreur serveur: ${error.message}`
+    });
+  }
+});
+
+/**
+ * Mettre à jour la configuration des flags
+ * POST /update_flag_config
+ */
+router.post('/update_flag_config', (req, res) => {
+  try {
+    const { flag_config } = req.body;
+    
+    if (!flag_config) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Le champ "flag_config" est requis'
+      });
+    }
+    
+    // Validation des valeurs
+    if (flag_config.mistral_api_score_threshold !== undefined) {
+      const threshold = parseFloat(flag_config.mistral_api_score_threshold);
+      if (isNaN(threshold) || threshold < 0.0 || threshold > 1.0) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Le seuil API Mistral doit être entre 0.0 et 1.0'
+        });
+      }
+    }
+    
+    // Mettre à jour la configuration en mémoire
+    FLAG_CONFIG = { ...FLAG_CONFIG, ...flag_config };
+    
+    // Sauvegarder dans le fichier
+    const saveSuccess = saveFlagConfig(FLAG_CONFIG);
+    
+    if (saveSuccess) {
+      return res.json({
+        status: 'success',
+        message: 'Configuration des flags mise à jour avec succès',
+        current_config: FLAG_CONFIG
+      });
+    } else {
+      return res.json({
+        status: 'warning',
+        message: 'Configuration mise à jour en mémoire mais non sauvegardée dans le fichier',
+        current_config: FLAG_CONFIG
+      });
+    }
+  } catch (error) {
+    logger.error(`Erreur lors de la mise à jour de la configuration des flags: ${error.message}`);
     return res.status(500).json({
       status: 'error',
       message: `Erreur serveur: ${error.message}`
@@ -1167,9 +1425,23 @@ router.post('/reviews', async (req, res) => {
 });
 ```
 
-## Nouveautés Version 2 - Fonctionnalités avancées
+## Nouveautés Version 2 - Système de flags RED/GREEN
 
-### Réponse API enrichie Version 2
+### Introduction au système de flags
+
+La Version 2 NodeJS intègre un système de flags automatiques pour optimiser le workflow de modération :
+
+- **🔴 FLAG RED** : Vérification humaine requise avant publication
+- **🟢 FLAG GREEN** : Publication automatique possible sans vérification
+
+#### Avantages du système
+
+- **Réduction de charge** : Moins d'avis nécessitent une vérification humaine
+- **Maintien de la qualité** : Les avis problématiques sont toujours vérifiés
+- **Configuration flexible** : Seuils ajustables selon vos besoins
+- **Traçabilité complète** : Justification de chaque décision
+
+### Réponse API enrichie avec flags Version 2
 
 La Version 2 retourne des informations détaillées sur les sources de modération :
 
@@ -1177,21 +1449,95 @@ La Version 2 retourne des informations détaillées sur les sources de modérati
 // Exemple de réponse API Version 2
 {
   "status": "success",
-  "original_text": "Ce docteur est un connard",
-  "moderated_text": "Ce docteur est un *******",
+  "original_text": "Dr Durant est un trou du cul",
+  "moderated_text": "Dr ***** est un ***********",
   "is_moderated": true,
-  "moderation_threshold": 1.0,
+  "moderation_threshold": 0.5,
   "api_result": { /* Détails de l'API Mistral */ },
   "moderation_details": {
-    "forbidden_words_applied": ["connard"],
+    "forbidden_words_applied": ["trou du cul"],
     "mistral_api_applied": [],
-    "proper_names_applied": [],
-    "sources": ["Dictionnaire de mots interdits"]
-  }
+    "proper_names_applied": ["Dr Durant"],
+    "sources": ["Dictionnaire de mots interdits", "Détection de noms propres"]
+  },
+  "flag": "RED",
+  "flag_reasons": [
+    "Mots interdits détectés (1 mot(s))",
+    "Noms propres détectés (1 nom(s)) - RGPD",
+    "Texte modifié pendant la modération"
+  ]
 }
 ```
 
-### Service de modération Version 2 amélioré
+### Configuration des flags en NodeJS
+
+#### Récupérer la configuration actuelle
+
+```javascript
+// Fonction pour récupérer la configuration des flags
+async function getFlagConfig() {
+  try {
+    const response = await fetch('http://localhost:5004/get_flag_config');
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+      return result.flag_config;
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    console.error('Erreur lors de la récupération de la config:', error);
+    throw error;
+  }
+}
+
+// Utilisation
+const currentConfig = await getFlagConfig();
+console.log('Configuration actuelle:', currentConfig);
+```
+
+#### Mettre à jour la configuration
+
+```javascript
+// Fonction pour mettre à jour la configuration des flags
+async function updateFlagConfig(newConfig) {
+  try {
+    const response = await fetch('http://localhost:5004/update_flag_config', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        flag_config: newConfig
+      })
+    });
+    
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+      console.log('✅ Configuration mise à jour avec succès');
+      return result.current_config;
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    console.error('Erreur lors de la mise à jour:', error);
+    throw error;
+  }
+}
+
+// Exemple d'utilisation
+const newConfig = {
+  mistral_api_score_threshold: 0.2, // Plus strict
+  forbidden_words_trigger_red: true,
+  proper_names_trigger_red: true,
+  text_modification_trigger_red: false // Moins strict sur ce critère
+};
+
+await updateFlagConfig(newConfig);
+```
+
+### Service de modération avec flags Version 2
 
 Voici la version mise à jour du service de modération avec traçabilité :
 
@@ -1367,10 +1713,28 @@ router.post('/moderate', async (req, res) => {
 ### Intégration client Version 2
 
 ```javascript
-// Client-side integration avec détection intelligente
+### Intégration client avec gestion des flags
+
+#### Classe client avancée avec flags
+
+```javascript
+// Client-side integration avec gestion des flags RED/GREEN
 class ModerationClientV2 {
   constructor(apiUrl = 'http://localhost:5004') {
     this.apiUrl = apiUrl;
+    this.flagCallbacks = {
+      RED: null,
+      GREEN: null
+    };
+  }
+  
+  // Configuration des callbacks pour chaque type de flag
+  onRedFlag(callback) {
+    this.flagCallbacks.RED = callback;
+  }
+  
+  onGreenFlag(callback) {
+    this.flagCallbacks.GREEN = callback;
   }
   
   async moderateText(text, threshold = 1.0) {
@@ -1384,6 +1748,9 @@ class ModerationClientV2 {
       const result = await response.json();
       
       if (result.status === 'success') {
+        // Traitement automatique selon le flag
+        await this.handleFlagResult(result);
+        
         // Analyser les sources de modération
         this.displayModerationSources(result.moderation_details);
         
@@ -1397,6 +1764,25 @@ class ModerationClientV2 {
     } catch (error) {
       console.error('Erreur de modération:', error);
       throw error;
+    }
+  }
+  
+  // Gestion automatique des flags
+  async handleFlagResult(result) {
+    const { flag, flag_reasons } = result;
+    
+    console.log(`🚦 FLAG ${flag}:`, flag_reasons);
+    
+    // Exécuter le callback approprié
+    if (this.flagCallbacks[flag]) {
+      await this.flagCallbacks[flag](result);
+    } else {
+      // Comportement par défaut
+      if (flag === 'RED') {
+        console.log('🔴 Avis nécessite une vérification humaine');
+      } else if (flag === 'GREEN') {
+        console.log('🟢 Avis validé pour publication automatique');
+      }
     }
   }
   
@@ -1460,8 +1846,55 @@ class ModerationClientV2 {
   }
 }
 
-// Utilisation
+}
+```
+
+#### Exemple d'utilisation avec gestion des flags
+
+```javascript
+// Configuration du client avec callbacks personnalisés
 const moderationClient = new ModerationClientV2();
+
+// Configuration des actions selon les flags
+moderationClient.onRedFlag(async (result) => {
+  console.log('🔴 Action RED: Envoi pour vérification humaine');
+  
+  // Envoyer vers file d'attente de vérification
+  await fetch('/api/moderation-queue', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      original_text: result.original_text,
+      moderated_text: result.moderated_text,
+      flag_reasons: result.flag_reasons,
+      status: 'pending_human_review',
+      timestamp: new Date().toISOString()
+    })
+  });
+  
+  // Notifier l'utilisateur
+  showNotification('Avis en attente de vérification', 'warning');
+});
+
+moderationClient.onGreenFlag(async (result) => {
+  console.log('🟢 Action GREEN: Publication automatique');
+  
+  // Publier automatiquement
+  await fetch('/api/reviews', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: result.moderated_text,
+      status: 'published',
+      publication_type: 'automatic',
+      moderation_applied: result.is_moderated,
+      timestamp: new Date().toISOString()
+    })
+  });
+  
+  // Notifier l'utilisateur
+  showNotification('Avis publié avec succès !', 'success');
+});
 
 // Dans votre formulaire
 document.getElementById('review-form').addEventListener('submit', async (e) => {
@@ -1472,17 +1905,32 @@ document.getElementById('review-form').addEventListener('submit', async (e) => {
   try {
     const result = await moderationClient.moderateText(text);
     
-    if (result.is_moderated) {
-      const sources = result.moderation_details.sources.join(', ');
-      alert(`Texte modéré par: ${sources}`);
-      document.getElementById('review-text').value = result.moderated_text;
-    }
+    // Les actions sont automatiquement exécutées selon le flag
+    // Pas besoin de logique conditionnelle ici
     
-    // Continuer avec la soumission...
+    console.log('Modération terminée:', {
+      flag: result.flag,
+      reasons: result.flag_reasons,
+      moderated: result.is_moderated
+    });
+    
   } catch (error) {
-    alert('Erreur de modération: ' + error.message);
+    showNotification('Erreur de modération: ' + error.message, 'error');
   }
 });
+
+// Fonction utilitaire pour les notifications
+function showNotification(message, type) {
+  const notification = document.createElement('div');
+  notification.className = `notification ${type}`;
+  notification.textContent = message;
+  
+  document.body.appendChild(notification);
+  
+  setTimeout(() => {
+    notification.remove();
+  }, 5000);
+}
 ```
 
 ## Indicateur de version dans l'interface
@@ -1491,7 +1939,7 @@ Si vous créez une interface web pour la gestion de la modération, pensez à aj
 
 ```javascript
 // Constante de version à mettre à jour manuellement
-const LAST_UPDATE = "31 Août 2025 - 14h32";
+const LAST_UPDATE = "31 Août 2025 - 17h51";
 
 // Affichage dans votre interface HTML
 document.getElementById('version-badge').innerHTML = `

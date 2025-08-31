@@ -14,6 +14,8 @@ Cette version 2 apporte des améliorations majeures :
 - **🔍 Détection intelligente des sources** : Savoir exactement qui a modéré quoi
 - **⚡ Ajout rapide de mots** : Interface pour ajouter facilement les mots manqués par l'IA
 - **🎯 Seuil par défaut optimisé** : Réglé à 1.0 (très permissif) pour éviter la sur-modération
+- **🔴🟢 Système de flags automatiques** : Classification RED/GREEN pour optimiser la vérification humaine
+- **⚙️ Configuration flexible** : Seuils ajustables via interface et API
 - **📅 Indicateur de version** : Affichage de la date de dernière mise à jour du code
 
 ## Table des matières
@@ -294,35 +296,142 @@ Le seuil de modération détermine la sensibilité de la détection des contenus
 
 Vous pouvez ajuster ce seuil en fonction de votre audience et du niveau de modération souhaité.
 
-## 8. Nouveautés Version 2 - Intégration avancée
+## 8. Nouveautés Version 2 - Système de flags RED/GREEN
 
-### 8.1. Nouvelle réponse API enrichie
+### 8.1. Introduction au système de flags automatiques
+
+La Version 2 intègre un système de **flags automatiques** pour optimiser le workflow de modération :
+
+- **🔴 FLAG RED** : Vérification humaine requise avant publication
+- **🟢 FLAG GREEN** : Publication automatique possible
+
+#### Critères de classification
+
+**FLAG RED déclenché si :**
+- Score API Mistral > seuil configurable (défaut: 0.3)
+- Mots interdits détectés
+- Noms propres détectés (RGPD)
+- Texte modifié pendant la modération
+
+**FLAG GREEN déclenché si :**
+- Aucun des critères RED n'est rempli
+- Score API faible
+- Pas de modification nécessaire
+
+### 8.2. Configuration des seuils de flags
+
+#### Récupérer la configuration actuelle
+
+```javascript
+// JavaScript
+async function getFlagConfig() {
+  const response = await fetch('http://localhost:5004/get_flag_config');
+  return await response.json();
+}
+```
+
+```php
+<?php
+// PHP
+function getFlagConfig() {
+    $url = 'http://localhost:5004/get_flag_config';
+    $response = file_get_contents($url);
+    return json_decode($response, true);
+}
+?>
+```
+
+#### Mettre à jour la configuration
+
+```javascript
+// JavaScript
+async function updateFlagConfig(config) {
+  const response = await fetch('http://localhost:5004/update_flag_config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ flag_config: config })
+  });
+  
+  return await response.json();
+}
+
+// Exemple d'usage
+const newConfig = {
+  mistral_api_score_threshold: 0.3,
+  forbidden_words_trigger_red: true,
+  proper_names_trigger_red: true,
+  text_modification_trigger_red: true
+};
+
+await updateFlagConfig(newConfig);
+```
+
+```php
+<?php
+// PHP
+function updateFlagConfig($config) {
+    $url = 'http://localhost:5004/update_flag_config';
+    $data = json_encode(['flag_config' => $config]);
+    
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/json\r\n",
+            'method'  => 'POST',
+            'content' => $data
+        ]
+    ];
+    
+    $context = stream_context_create($options);
+    $result = file_get_contents($url, false, $context);
+    
+    return json_decode($result, true);
+}
+
+// Exemple d'usage
+$newConfig = [
+    'mistral_api_score_threshold' => 0.3,
+    'forbidden_words_trigger_red' => true,
+    'proper_names_trigger_red' => true,
+    'text_modification_trigger_red' => true
+];
+
+$result = updateFlagConfig($newConfig);
+?>
+```
+
+### 8.3. Nouvelle réponse API enrichie avec flags
 
 La Version 2 retourne des informations détaillées sur les sources de modération :
 
 ```json
 {
   "status": "success",
-  "original_text": "Ce docteur est un connard",
-  "moderated_text": "Ce docteur est un *******",
+  "original_text": "Dr Durant est un trou du cul",
+  "moderated_text": "Dr ***** est un ***********",
   "is_moderated": true,
   "moderation_threshold": 1.0,
   "api_result": { /* Détails de l'API Mistral */ },
   "moderation_details": {
-    "forbidden_words_applied": ["connard"],
+    "forbidden_words_applied": ["trou du cul"],
     "mistral_api_applied": [],
-    "proper_names_applied": [],
-    "sources": ["Dictionnaire de mots interdits"]
-  }
+    "proper_names_applied": ["Dr Durant"],
+    "sources": ["Dictionnaire de mots interdits", "Détection de noms propres"]
+  },
+  "flag": "RED",
+  "flag_reasons": [
+    "Mots interdits détectés (1 mot(s))",
+    "Noms propres détectés (1 nom(s)) - RGPD",
+    "Texte modifié pendant la modération"
+  ]
 }
 ```
 
-### 8.2. Intégration JavaScript avancée
+### 8.4. Intégration JavaScript avec gestion des flags
 
 Voici comment exploiter les nouvelles fonctionnalités :
 
 ```javascript
-// Fonction de modération Version 2
+// Fonction de modération avec flags Version 2
 async function modererTexteV2(texte, seuil = 1.0) {
   try {
     const response = await fetch('http://localhost:5004/moderate', {
@@ -339,6 +448,9 @@ async function modererTexteV2(texte, seuil = 1.0) {
     const result = await response.json();
     
     if (result.status === 'success') {
+      // Afficher le flag et les raisons
+      displayFlagResult(result.flag, result.flag_reasons);
+      
       // Afficher les sources de modération
       displayModerationSources(result.moderation_details);
       
@@ -349,6 +461,19 @@ async function modererTexteV2(texte, seuil = 1.0) {
   } catch (error) {
     console.error('Erreur lors de la modération :', error);
     return null;
+  }
+}
+
+// Affichage du flag et des raisons
+function displayFlagResult(flag, reasons) {
+  const flagEmoji = flag === 'RED' ? '🔴' : '🟢';
+  const flagText = flag === 'RED' ? 'Vérification humaine requise' : 'Publication automatique possible';
+  
+  console.log(`${flagEmoji} FLAG ${flag}: ${flagText}`);
+  
+  if (reasons && reasons.length > 0) {
+    console.log('Raisons:');
+    reasons.forEach(reason => console.log(`  • ${reason}`));
   }
 }
 
@@ -383,27 +508,181 @@ document.getElementById('formulaire-avis').addEventListener('submit', async func
   const resultat = await modererTexteV2(texteAvis);
   
   if (resultat && resultat.status === 'success') {
-    if (resultat.is_moderated) {
-      // Afficher un message informatif selon la source
-      const sources = resultat.moderation_details.sources;
-      let message = 'Votre avis a été modéré par : ' + sources.join(', ');
+    // Traitement selon le flag
+    if (resultat.flag === 'RED') {
+      // Vérification humaine requise
+      const reasons = resultat.flag_reasons.join('\n• ');
+      alert(`🔴 Vérification humaine requise\n\nRaisons:\n• ${reasons}\n\nL'avis sera envoyé pour validation avant publication.`);
       
-      // Proposer le texte modéré
-      if (confirm(message + '\n\nVoulez-vous utiliser la version modérée ?')) {
-        document.getElementById('texte-avis').value = resultat.moderated_text;
+      // Envoyer vers la file de vérification humaine
+      await sendForHumanReview({
+        original_text: resultat.original_text,
+        moderated_text: resultat.moderated_text,
+        flag_reasons: resultat.flag_reasons
+      });
+      
+    } else if (resultat.flag === 'GREEN') {
+      // Publication automatique possible
+      if (resultat.is_moderated) {
+        const sources = resultat.moderation_details.sources.join(', ');
+        if (confirm(`🟢 Avis validé automatiquement\n\nModération appliquée par: ${sources}\n\nVoulez-vous publier la version modérée ?`)) {
+          await publishAutomatically(resultat.moderated_text);
+        }
+      } else {
+        // Aucune modération nécessaire
+        alert('🟢 Avis validé et publié automatiquement !');
+        await publishAutomatically(resultat.original_text);
       }
-    } else {
-      // Aucune modération nécessaire
-      alert('Avis soumis avec succès !');
-      // Soumettre le formulaire...
     }
   } else {
     alert('Erreur lors de la modération. Veuillez réessayer.');
   }
 });
+
+// Fonctions de traitement des flags
+async function sendForHumanReview(data) {
+  // Logique d'envoi vers système de vérification humaine
+  try {
+    const response = await fetch('/api/moderation-queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...data,
+        status: 'pending_human_review',
+        timestamp: new Date().toISOString()
+      })
+    });
+    
+    if (response.ok) {
+      console.log('✅ Avis envoyé pour vérification humaine');
+    }
+  } catch (error) {
+    console.error('Erreur envoi vérification:', error);
+  }
+}
+
+async function publishAutomatically(text) {
+  // Logique de publication automatique
+  try {
+    const response = await fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: text,
+        status: 'published',
+        publication_type: 'automatic',
+        timestamp: new Date().toISOString()
+      })
+    });
+    
+    if (response.ok) {
+      console.log('✅ Avis publié automatiquement');
+    }
+  } catch (error) {
+    console.error('Erreur publication automatique:', error);
+  }
+}
 ```
 
-### 8.3. Gestion intelligente des mots non détectés
+### 8.5. Intégration PHP avec gestion des flags
+
+```php
+<?php
+function traiterAvisAvecFlags($texteAvis, $seuil = 1.0) {
+    $url = 'http://localhost:5004/moderate';
+    $data = json_encode([
+        'text' => $texteAvis,
+        'moderation_threshold' => $seuil
+    ]);
+    
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/json\r\n",
+            'method'  => 'POST',
+            'content' => $data
+        ]
+    ];
+    
+    $context = stream_context_create($options);
+    $result = file_get_contents($url, false, $context);
+    
+    if ($result === FALSE) {
+        return ['error' => 'Erreur de connexion API'];
+    }
+    
+    $resultat = json_decode($result, true);
+    
+    if ($resultat && $resultat['status'] === 'success') {
+        // Traitement selon le flag
+        if ($resultat['flag'] === 'RED') {
+            // Vérification humaine requise
+            return envoyerPourVerificationHumaine($resultat);
+        } elseif ($resultat['flag'] === 'GREEN') {
+            // Publication automatique possible
+            return publierAutomatiquement($resultat);
+        }
+    }
+    
+    return ['error' => 'Erreur de modération'];
+}
+
+function envoyerPourVerificationHumaine($resultat) {
+    // Insertion en base pour vérification humaine
+    $pdo = getPDOConnection();
+    $stmt = $pdo->prepare(
+        "INSERT INTO moderation_queue (original_text, moderated_text, flag_reasons, status, created_at) 
+         VALUES (?, ?, ?, 'pending_human_review', NOW())"
+    );
+    
+    $stmt->execute([
+        $resultat['original_text'],
+        $resultat['moderated_text'],
+        json_encode($resultat['flag_reasons'])
+    ]);
+    
+    return [
+        'status' => 'queued_for_review',
+        'message' => '🔴 Avis envoyé pour vérification humaine',
+        'reasons' => $resultat['flag_reasons']
+    ];
+}
+
+function publierAutomatiquement($resultat) {
+    // Publication directe en base
+    $pdo = getPDOConnection();
+    $stmt = $pdo->prepare(
+        "INSERT INTO reviews (text, status, publication_type, moderation_applied, created_at) 
+         VALUES (?, 'published', 'automatic', ?, NOW())"
+    );
+    
+    $stmt->execute([
+        $resultat['moderated_text'],
+        $resultat['is_moderated'] ? 1 : 0
+    ]);
+    
+    return [
+        'status' => 'published',
+        'message' => '🟢 Avis publié automatiquement',
+        'moderation_applied' => $resultat['is_moderated']
+    ];
+}
+
+// Exemple d'utilisation
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $avis = $_POST['texte_avis'] ?? '';
+    
+    if (!empty($avis)) {
+        $resultat = traiterAvisAvecFlags($avis);
+        
+        // Retourner le résultat en JSON pour AJAX
+        header('Content-Type: application/json');
+        echo json_encode($resultat);
+    }
+}
+?>
+```
+
+### 8.6. Gestion intelligente des mots non détectés
 
 La Version 2 permet de détecter automatiquement les mots que l'IA a manqués :
 
@@ -463,14 +742,14 @@ async function processReviewWithSmartDetection(texte) {
 }
 ```
 
-### 8.4. Interface de gestion avancée
+### 8.7. Interface de gestion avancée avec flags
 
 Créez une interface d'administration pour gérer la modération :
 
 ```html
 <!-- Interface d'administration -->
 <div id="moderation-admin">
-  <h3>🔧 Administration de la modération</h3>
+  <h3>🔧 Administration de la modération avec flags</h3>
   
   <!-- Test de modération -->
   <div class="test-section">
@@ -480,6 +759,7 @@ Créez une interface d'administration pour gérer la modération :
     
     <div id="test-results" style="display:none;">
       <h5>Résultats :</h5>
+      <div id="flag-result"></div>
       <div id="original-text"></div>
       <div id="moderated-text"></div>
       <div id="moderation-sources"></div>
@@ -502,6 +782,18 @@ async function testModeration() {
   const result = await modererTexteV2(text);
   
   if (result) {
+    // Afficher le flag avec couleur
+    const flagEmoji = result.flag === 'RED' ? '🔴' : '🟢';
+    const flagColor = result.flag === 'RED' ? '#dc3545' : '#28a745';
+    const flagText = result.flag === 'RED' ? 'Vérification humaine' : 'Publication automatique';
+    
+    document.getElementById('flag-result').innerHTML = 
+      `<div style="color: ${flagColor}; font-weight: bold; margin-bottom: 10px;">
+         ${flagEmoji} FLAG ${result.flag}: ${flagText}
+         ${result.flag_reasons && result.flag_reasons.length > 0 ? 
+           '<br><small>Raisons: ' + result.flag_reasons.join(', ') + '</small>' : ''}
+       </div>`;
+    
     document.getElementById('original-text').innerHTML = 
       `<strong>Original:</strong> ${result.original_text}`;
     document.getElementById('moderated-text').innerHTML = 
@@ -539,7 +831,147 @@ async function loadWordsList() {
 </script>
 ```
 
-### 8.5. Intégration avec frameworks modernes
+### 8.8. Configuration des flags en temps réel
+
+```html
+<!-- Interface de configuration des flags -->
+<div class="flag-config-section">
+  <h4>⚙️ Configuration des flags RED/GREEN</h4>
+  
+  <div class="config-form">
+    <div class="form-group">
+      <label>Seuil API Mistral:</label>
+      <input type="range" id="api-threshold" min="0" max="1" step="0.05" value="0.3">
+      <span id="threshold-value">0.3</span>
+    </div>
+    
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="forbidden-words-red" checked>
+        Mots interdits → FLAG RED
+      </label>
+    </div>
+    
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="proper-names-red" checked>
+        Noms propres → FLAG RED (RGPD)
+      </label>
+    </div>
+    
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="text-modified-red" checked>
+        Texte modifié → FLAG RED
+      </label>
+    </div>
+    
+    <button onclick="saveFlags Configuration()">Sauvegarder</button>
+  </div>
+  
+  <div id="config-preview" class="preview-section"></div>
+</div>
+
+<script>
+// Gestion de la configuration des flags
+const thresholdSlider = document.getElementById('api-threshold');
+const thresholdValue = document.getElementById('threshold-value');
+
+thresholdSlider.addEventListener('input', function() {
+  thresholdValue.textContent = this.value;
+  updateConfigPreview();
+});
+
+function updateConfigPreview() {
+  const config = getCurrentConfig();
+  const preview = document.getElementById('config-preview');
+  
+  const redConditions = [];
+  if (config.mistral_api_score_threshold < 1.0) {
+    redConditions.push(`Score API > ${config.mistral_api_score_threshold}`);
+  }
+  if (config.forbidden_words_trigger_red) {
+    redConditions.push('Mots interdits détectés');
+  }
+  if (config.proper_names_trigger_red) {
+    redConditions.push('Noms propres détectés');
+  }
+  if (config.text_modification_trigger_red) {
+    redConditions.push('Texte modifié');
+  }
+  
+  preview.innerHTML = `
+    <h5>Prévision du comportement :</h5>
+    <div style="color: #dc3545;">
+      <strong>🔴 FLAG RED si :</strong><br>
+      ${redConditions.length > 0 ? redConditions.map(c => `• ${c}`).join('<br>') : '• Aucune condition (tous GREEN)'}
+    </div>
+    <div style="color: #28a745; margin-top: 10px;">
+      <strong>🟢 FLAG GREEN si :</strong><br>
+      • Aucune condition RED remplie
+    </div>
+  `;
+}
+
+function getCurrentConfig() {
+  return {
+    mistral_api_score_threshold: parseFloat(thresholdSlider.value),
+    forbidden_words_trigger_red: document.getElementById('forbidden-words-red').checked,
+    proper_names_trigger_red: document.getElementById('proper-names-red').checked,
+    text_modification_trigger_red: document.getElementById('text-modified-red').checked
+  };
+}
+
+async function saveFlagsConfiguration() {
+  const config = getCurrentConfig();
+  
+  try {
+    const response = await fetch('http://localhost:5004/update_flag_config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flag_config: config })
+    });
+    
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+      alert('✅ Configuration sauvegardée avec succès !');
+    } else {
+      alert('❌ Erreur lors de la sauvegarde');
+    }
+  } catch (error) {
+    alert('❌ Erreur de connexion: ' + error.message);
+  }
+}
+
+// Charger la configuration au démarrage
+async function loadFlagsConfiguration() {
+  try {
+    const response = await fetch('http://localhost:5004/get_flag_config');
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+      const config = result.flag_config;
+      
+      thresholdSlider.value = config.mistral_api_score_threshold;
+      thresholdValue.textContent = config.mistral_api_score_threshold;
+      document.getElementById('forbidden-words-red').checked = config.forbidden_words_trigger_red;
+      document.getElementById('proper-names-red').checked = config.proper_names_trigger_red;
+      document.getElementById('text-modified-red').checked = config.text_modification_trigger_red;
+      
+      updateConfigPreview();
+    }
+  } catch (error) {
+    console.error('Erreur lors du chargement de la config:', error);
+  }
+}
+
+// Charger au démarrage de la page
+document.addEventListener('DOMContentLoaded', loadFlagsConfiguration);
+</script>
+```
+
+### 8.9. Intégration avec frameworks modernes
 
 #### React/Next.js
 
@@ -563,6 +995,15 @@ function ModerationHook() {
       const result = await response.json();
       setModerationResult(result);
       
+      // Traitement automatique selon le flag
+      if (result.flag === 'RED') {
+        console.log('🔴 Avis en attente de vérification humaine');
+        // Logique pour envoi en file d'attente
+      } else if (result.flag === 'GREEN') {
+        console.log('🟢 Avis validé pour publication automatique');
+        // Logique de publication automatique
+      }
+      
       return result;
     } catch (error) {
       console.error('Erreur de modération:', error);
@@ -573,6 +1014,34 @@ function ModerationHook() {
   };
   
   return { moderateText, moderationResult, isLoading };
+}
+
+// Composant d'affichage des flags
+function FlagDisplay({ flag, reasons }) {
+  if (!flag) return null;
+  
+  const isRed = flag === 'RED';
+  const emoji = isRed ? '🔴' : '🟢';
+  const color = isRed ? '#dc3545' : '#28a745';
+  const text = isRed ? 'Vérification humaine requise' : 'Publication automatique possible';
+  
+  return (
+    <div className={`flag-display flag-${flag.toLowerCase()}`} style={{ color, padding: '15px', borderRadius: '8px', backgroundColor: isRed ? '#fff5f5' : '#f0fff4', border: `2px solid ${color}` }}>
+      <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+        {emoji} FLAG {flag}: {text}
+      </div>
+      {reasons && reasons.length > 0 && (
+        <div style={{ fontSize: '14px', opacity: 0.8 }}>
+          <strong>Raisons:</strong>
+          <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+            {reasons.map((reason, index) => (
+              <li key={index}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Composant d'affichage des sources
@@ -732,7 +1201,7 @@ tail -f moderation.log
 
 L'interface Streamlit affiche désormais en haut à droite un badge vert avec la date et l'heure de la dernière mise à jour du code :
 
-**✓ Last update : 31 Août 2025 - 14h32**
+**✓ Last update : 31 Août 2025 - 17h51**
 
 Cette date est définie dans le fichier `streamlit_moderation.py` (ligne 109) :
 

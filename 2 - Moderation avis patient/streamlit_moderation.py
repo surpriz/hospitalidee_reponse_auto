@@ -72,6 +72,41 @@ def remove_forbidden_word(word):
         st.error(f"Erreur lors de la suppression du mot interdit: {str(e)}")
         return None
 
+# Fonction pour récupérer la configuration des flags
+def get_flag_config():
+    try:
+        response = requests.get(
+            f"{API_URL}/get_flag_config",
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return response.json().get('flag_config', {})
+        else:
+            st.error(f"Erreur API ({response.status_code}): {response.text}")
+            return {}
+    except Exception as e:
+        st.error(f"Erreur lors de la récupération de la configuration des flags: {str(e)}")
+        return {}
+
+# Fonction pour mettre à jour la configuration des flags
+def update_flag_config(config):
+    try:
+        response = requests.post(
+            f"{API_URL}/update_flag_config",
+            json={"flag_config": config},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Erreur API ({response.status_code}): {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"Erreur lors de la mise à jour de la configuration des flags: {str(e)}")
+        return None
+
 # Fonction pour récupérer la liste des mots interdits
 def get_forbidden_words():
     try:
@@ -94,7 +129,7 @@ st.title("🔍 Modération d'avis clients")
 
 # Date et heure de dernière mise à jour du code (à modifier manuellement lors des mises à jour)
 # Format : "Jour Mois Année - HHhMM"
-LAST_UPDATE = "31 Août 2025 - 14h32"
+LAST_UPDATE = "31 Août 2025 - 17h51"
 
 # Afficher avec un badge de mise à jour
 col_title, col_update = st.columns([3, 1])
@@ -112,10 +147,12 @@ with col_update:
 
 st.markdown("---")
 
-# Créer deux colonnes principales
-col1, col2 = st.columns([3, 2])
+# Créer des onglets pour organiser l'interface
+tab1, tab2, tab3 = st.tabs(["🔍 Test de modération", "📋 Gestion des mots", "⚙️ Configuration des flags"])
 
-with col1:
+with tab1:
+
+    # Section de test de modération
     st.header("Test de modération")
     
     # Zone de texte pour l'avis à modérer
@@ -158,8 +195,53 @@ with col1:
                 result = moderate_text(review, threshold)
                 
                 if result and result.get('status') == 'success':
+                    # Afficher le flag en premier avec une mise en forme visuelle
+                    flag = result.get('flag', 'UNKNOWN')
+                    flag_reasons = result.get('flag_reasons', [])
+                    
+                    st.subheader("🚦 Décision de filtrage automatique")
+                    
+                    flag_col, reason_col = st.columns([1, 2])
+                    
+                    with flag_col:
+                        if flag == "RED":
+                            st.markdown(
+                                """
+                                <div style="text-align: center; padding: 20px; background-color: #ffebee; border-radius: 10px; border-left: 5px solid #f44336;">
+                                    <h2 style="color: #d32f2f; margin: 0;">🔴 FLAG RED</h2>
+                                    <p style="margin: 5px 0 0 0; color: #d32f2f;"><strong>Vérification humaine requise</strong></p>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                        elif flag == "GREEN":
+                            st.markdown(
+                                """
+                                <div style="text-align: center; padding: 20px; background-color: #e8f5e8; border-radius: 10px; border-left: 5px solid #4caf50;">
+                                    <h2 style="color: #2e7d32; margin: 0;">🟢 FLAG GREEN</h2>
+                                    <p style="margin: 5px 0 0 0; color: #2e7d32;"><strong>Publication automatique possible</strong></p>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                        else:
+                            st.warning(f"Flag inconnu: {flag}")
+                    
+                    with reason_col:
+                        st.markdown("**Raisons de la décision :**")
+                        if flag_reasons:
+                            for reason in flag_reasons:
+                                if flag == "RED":
+                                    st.markdown(f"• ⚠️ {reason}")
+                                else:
+                                    st.markdown(f"• ✅ {reason}")
+                        else:
+                            st.markdown("Aucune raison fournie")
+                    
+                    st.markdown("---")
+                    
                     # Afficher les résultats avec mise en forme
-                    st.subheader("Résultat de la modération")
+                    st.subheader("📝 Détails de la modération")
                     
                     col_orig, col_mod = st.columns(2)
                     
@@ -279,12 +361,9 @@ with col1:
         else:
             st.warning("Veuillez saisir un texte à modérer.")
     
-    # Espace supplémentaire pour équilibrer l'interface
-    st.markdown("&nbsp;")
-    st.markdown("&nbsp;")
 
-with col2:
-    st.header("Gestion des mots interdits")
+with tab2:
+    st.header("📋 Gestion des mots interdits")
     
     # Information sur le fichier des mots interdits
     st.info("Les mots interdits sont stockés dans le fichier 'mots_interdits.txt'. Vous pouvez modifier ce fichier directement ou utiliser cette interface.")
@@ -340,6 +419,139 @@ with col2:
                 st.rerun()
             else:
                 st.error("Échec de l'ajout du mot interdit.")
+
+with tab3:
+    st.header("⚙️ Configuration des flags RED/GREEN")
+    
+    # Information sur le système de flags
+    st.info(
+        """
+        🚦 **Système de flags automatiques** :
+        - **🔴 FLAG RED** : L'avis nécessite une vérification humaine avant publication
+        - **🟢 FLAG GREEN** : L'avis peut être publié automatiquement
+        
+        Ajustez les seuils ci-dessous pour calibrer le comportement du système.
+        """
+    )
+    
+    # Récupérer la configuration actuelle
+    current_config = get_flag_config()
+    
+    if current_config:
+        st.subheader("🎯 Configuration des seuils")
+        
+        with st.form("flag_config_form"):
+            # Seuil API Mistral
+            api_threshold = st.slider(
+                "Seuil API Mistral (score maximum acceptable)",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(current_config.get('mistral_api_score_threshold', 0.3)),
+                step=0.05,
+                help="Si le score de l'API Mistral dépasse ce seuil, l'avis aura un FLAG RED"
+            )
+            
+            col_checkboxes1, col_checkboxes2 = st.columns(2)
+            
+            with col_checkboxes1:
+                # Mots interdits
+                forbidden_words_trigger = st.checkbox(
+                    "Mots interdits → FLAG RED",
+                    value=current_config.get('forbidden_words_trigger_red', True),
+                    help="Si des mots interdits sont détectés, l'avis aura un FLAG RED"
+                )
+                
+                # Noms propres
+                proper_names_trigger = st.checkbox(
+                    "Noms propres → FLAG RED",
+                    value=current_config.get('proper_names_trigger_red', True),
+                    help="Si des noms propres sont détectés (RGPD), l'avis aura un FLAG RED"
+                )
+            
+            with col_checkboxes2:
+                # Modification du texte
+                text_modification_trigger = st.checkbox(
+                    "Texte modifié → FLAG RED",
+                    value=current_config.get('text_modification_trigger_red', True),
+                    help="Si le texte a été modifié par la modération, l'avis aura un FLAG RED"
+                )
+            
+            # Affichage prévisionnel du comportement
+            st.markdown("---")
+            st.subheader("🔮 Prévision du comportement")
+            
+            behavior_col1, behavior_col2 = st.columns(2)
+            
+            with behavior_col1:
+                st.markdown("🔴 **FLAG RED sera attribué si :**")
+                red_conditions = []
+                if api_threshold < 1.0:
+                    red_conditions.append(f"• Score API Mistral > {api_threshold}")
+                if forbidden_words_trigger:
+                    red_conditions.append("• Mots interdits détectés")
+                if proper_names_trigger:
+                    red_conditions.append("• Noms propres détectés")
+                if text_modification_trigger:
+                    red_conditions.append("• Texte a été modifié")
+                
+                if red_conditions:
+                    for condition in red_conditions:
+                        st.markdown(condition)
+                else:
+                    st.markdown("• Aucune condition activée (tous les avis seront GREEN)")
+            
+            with behavior_col2:
+                st.markdown("🟢 **FLAG GREEN sera attribué si :**")
+                st.markdown("• Aucune des conditions RED n'est remplie")
+                st.markdown("• Score API Mistral faible")
+                st.markdown("• Pas de contenu problématique détecté")
+            
+            # Bouton de sauvegarde
+            submitted = st.form_submit_button("💾 Sauvegarder la configuration", type="primary")
+            
+            if submitted:
+                new_config = {
+                    'mistral_api_score_threshold': api_threshold,
+                    'forbidden_words_trigger_red': forbidden_words_trigger,
+                    'proper_names_trigger_red': proper_names_trigger,
+                    'text_modification_trigger_red': text_modification_trigger
+                }
+                
+                result = update_flag_config(new_config)
+                if result and result.get('status') in ['success', 'warning']:
+                    st.success("✅ Configuration sauvegardée avec succès !")
+                    st.rerun()
+                else:
+                    st.error("❌ Échec de la sauvegarde de la configuration.")
+        
+        # Statistiques et informations supplémentaires
+        st.markdown("---")
+        st.subheader("📊 Conseils d'utilisation")
+        
+        col_tips1, col_tips2 = st.columns(2)
+        
+        with col_tips1:
+            st.markdown(
+                """
+                **📈 Pour un filtrage plus strict :**
+                - Réduire le seuil API Mistral (ex: 0.2)
+                - Activer tous les triggers
+                - Tester avec différents exemples
+                """
+            )
+        
+        with col_tips2:
+            st.markdown(
+                """
+                **📉 Pour un filtrage plus permissif :**
+                - Augmenter le seuil API Mistral (ex: 0.5)
+                - Désactiver certains triggers
+                - Surveiller les faux négatifs
+                """
+            )
+    
+    else:
+        st.error("Impossible de récupérer la configuration actuelle des flags.")
 
 # Pied de page
 st.markdown("---")

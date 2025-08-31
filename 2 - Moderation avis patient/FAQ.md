@@ -1,6 +1,6 @@
 # FAQ – Application de Modération d'Avis Clients
 
-**Dernière mise à jour : 31 Août 2025**
+**Dernière mise à jour : 31 Août 2025 - 17h51**
 
 ---
 
@@ -199,6 +199,154 @@ Cette fonctionnalité protège automatiquement l'identité des personnes mention
 
 L'interface Streamlit affiche en haut à droite un badge vert avec la date et l'heure de la dernière mise à jour du code :
 
-**✓ Last update : 31 Août 2025 - 14h32**
+**✓ Last update : 31 Août 2025 - 17h51**
 
-Cette date est fixe et correspond à la dernière modification du code de l'application (et non au rafraîchissement de la page). Elle permet de vérifier que vous utilisez bien la dernière version de l'application. 
+Cette date est fixe et correspond à la dernière modification du code de l'application (et non au rafraîchissement de la page). Elle permet de vérifier que vous utilisez bien la dernière version de l'application.
+
+---
+
+## 11. Comment fonctionne le nouveau système de flags RED/GREEN ?
+
+### Système de filtrage automatique (Nouveauté 31 Août 2025)
+
+Le système de modération intègre maintenant un mécanisme de **flags automatiques** pour optimiser le travail de vérification humaine :
+
+- **🔴 FLAG RED** : L'avis nécessite une vérification humaine avant publication
+- **🟢 FLAG GREEN** : L'avis peut être publié automatiquement sans vérification
+
+### Critères de classification
+
+**Un avis reçoit un FLAG RED si :**
+- Le score de l'API Mistral dépasse le seuil configuré (défaut : 0.3)
+- Des mots interdits sont détectés
+- Des noms propres sont détectés (conformité RGPD)
+- Le texte original a été modifié pendant la modération
+
+**Un avis reçoit un FLAG GREEN si :**
+- Aucun des critères RED n'est rempli
+- Le score API Mistral est faible
+- Aucune modification du texte n'est nécessaire
+
+### Configuration des seuils
+
+Les seuils sont configurables via :
+- **Interface Streamlit** : Onglet "⚙️ Configuration des flags"
+- **API REST** : Endpoints `/get_flag_config` et `/update_flag_config`
+- **Fichier** : `flag_config.json` pour la persistance
+
+### Exemple de réponse API avec flags
+
+```json
+{
+  "status": "success",
+  "original_text": "Dr Durant est un trou du cul",
+  "moderated_text": "Dr ***** est un ***********",
+  "is_moderated": true,
+  "flag": "RED",
+  "flag_reasons": [
+    "Score API Mistral élevé (0.935 >= 0.3)",
+    "Mots interdits détectés (1 mot(s))",
+    "Noms propres détectés (1 nom(s)) - RGPD",
+    "Texte modifié pendant la modération"
+  ]
+}
+```
+
+### Impact sur le workflow de modération
+
+- **Avis FLAG GREEN** : Publication automatique possible → gain de temps
+- **Avis FLAG RED** : Vérification humaine requise → maintien de la qualité
+- **Seuils ajustables** : Adaptation selon vos besoins métier
+
+### Configuration recommandée
+
+Pour commencer, utilisez ces paramètres :
+- **Seuil API Mistral** : 0.3 (détection stricte)
+- **Mots interdits → RED** : Activé
+- **Noms propres → RED** : Activé (RGPD)
+- **Texte modifié → RED** : Activé
+
+Ajustez progressivement selon votre volume et vos besoins.
+
+---
+
+## 12. Comment utiliser l'API avec les flags ?
+
+### Nouveaux endpoints disponibles
+
+#### Récupérer la configuration actuelle
+```bash
+GET http://localhost:5004/get_flag_config
+```
+
+#### Mettre à jour la configuration
+```bash
+POST http://localhost:5004/update_flag_config
+Content-Type: application/json
+
+{
+  "flag_config": {
+    "mistral_api_score_threshold": 0.3,
+    "forbidden_words_trigger_red": true,
+    "proper_names_trigger_red": true,
+    "text_modification_trigger_red": true
+  }
+}
+```
+
+### Exemple d'intégration JavaScript avec flags
+
+```javascript
+// Fonction de modération avec gestion des flags
+async function moderateWithFlags(text) {
+  try {
+    const response = await fetch('http://localhost:5004/moderate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, moderation_threshold: 0.5 })
+    });
+    
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+      // Traitement selon le flag
+      if (result.flag === 'RED') {
+        console.log('🔴 Vérification humaine requise');
+        console.log('Raisons:', result.flag_reasons);
+        // Envoyer vers la file de vérification humaine
+        await sendForHumanReview(result);
+      } else if (result.flag === 'GREEN') {
+        console.log('🟢 Publication automatique possible');
+        // Publier automatiquement
+        await publishAutomatically(result);
+      }
+      
+      return result;
+    }
+  } catch (error) {
+    console.error('Erreur de modération:', error);
+  }
+}
+
+// Fonctions de traitement
+async function sendForHumanReview(moderationResult) {
+  // Logique d'envoi vers système de vérification humaine
+  await saveToModerationQueue({
+    original_text: moderationResult.original_text,
+    moderated_text: moderationResult.moderated_text,
+    flag_reasons: moderationResult.flag_reasons,
+    status: 'pending_human_review'
+  });
+}
+
+async function publishAutomatically(moderationResult) {
+  // Logique de publication automatique
+  await publishReview({
+    text: moderationResult.moderated_text,
+    status: 'published',
+    moderation_applied: moderationResult.is_moderated
+  });
+}
+```
+
+Ce système permet de réduire significativement le volume d'avis nécessitant une vérification humaine tout en maintenant un haut niveau de qualité. 

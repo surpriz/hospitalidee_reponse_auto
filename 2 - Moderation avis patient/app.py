@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import re
+import json
 from dotenv import load_dotenv
 import logging
 from datetime import datetime
@@ -29,6 +30,8 @@ if not MISTRAL_API_KEY:
 
 # Fichier contenant les mots interdits
 FORBIDDEN_WORDS_FILE = "mots_interdits.txt"
+# Fichier de configuration des flags
+FLAG_CONFIG_FILE = "flag_config.json"
 # Seuil de modération par défaut
 DEFAULT_MODERATION_THRESHOLD = 0.5
 
@@ -70,8 +73,112 @@ def save_forbidden_words(words_dict):
         logger.error(f"Erreur lors de la sauvegarde des mots interdits: {str(e)}")
         return False
 
-# Charger les mots interdits au démarrage
+# Fonction pour charger la configuration des flags
+def load_flag_config():
+    """Charge la configuration des seuils de flags depuis le fichier JSON"""
+    try:
+        if os.path.exists(FLAG_CONFIG_FILE):
+            with open(FLAG_CONFIG_FILE, 'r', encoding='utf-8') as file:
+                config = json.load(file)
+                return config.get('flag_thresholds', {})
+        else:
+            # Configuration par défaut si le fichier n'existe pas
+            default_config = {
+                "mistral_api_score_threshold": 0.3,
+                "forbidden_words_trigger_red": True,
+                "proper_names_trigger_red": True,
+                "text_modification_trigger_red": True
+            }
+            return default_config
+    except Exception as e:
+        logger.error(f"Erreur lors du chargement de la configuration des flags: {str(e)}")
+        # Retourner la configuration par défaut en cas d'erreur
+        return {
+            "mistral_api_score_threshold": 0.3,
+            "forbidden_words_trigger_red": True,
+            "proper_names_trigger_red": True,
+            "text_modification_trigger_red": True
+        }
+
+# Fonction pour sauvegarder la configuration des flags
+def save_flag_config(config):
+    """Sauvegarde la configuration des flags dans le fichier JSON"""
+    try:
+        # Charger la configuration existante pour garder les métadonnées
+        full_config = {
+            "flag_thresholds": config,
+            "description": {
+                "mistral_api_score_threshold": "Si le score max de l'API Mistral dépasse ce seuil, flag RED (0.0-1.0)",
+                "forbidden_words_trigger_red": "Si des mots interdits sont détectés, flag RED",
+                "proper_names_trigger_red": "Si des noms propres sont détectés, flag RED",
+                "text_modification_trigger_red": "Si le texte a été modifié, flag RED"
+            },
+            "version": "1.0",
+            "last_updated": datetime.now().strftime("%Y-%m-%d")
+        }
+        
+        with open(FLAG_CONFIG_FILE, 'w', encoding='utf-8') as file:
+            json.dump(full_config, file, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde de la configuration des flags: {str(e)}")
+        return False
+
+# Fonction pour déterminer le flag RED/GREEN
+def determine_flag(api_result, moderation_details, original_text, moderated_text, flag_config):
+    """
+    Détermine si un avis doit avoir un flag RED ou GREEN
+    
+    Args:
+        api_result (dict): Résultat de l'API Mistral
+        moderation_details (dict): Détails de la modération
+        original_text (str): Texte original
+        moderated_text (str): Texte modéré
+        flag_config (dict): Configuration des seuils
+    
+    Returns:
+        tuple: (flag, reasons) - flag: "RED" ou "GREEN", reasons: liste des raisons
+    """
+    reasons = []
+    
+    # 1. Vérifier le score de l'API Mistral
+    mistral_threshold = flag_config.get('mistral_api_score_threshold', 0.3)
+    max_score = 0.0
+    
+    if 'results' in api_result and len(api_result['results']) > 0:
+        category_scores = api_result['results'][0].get('category_scores', {})
+        if category_scores:
+            max_score = max(category_scores.values())
+            
+            if max_score >= mistral_threshold:
+                reasons.append(f"Score API Mistral élevé ({max_score:.3f} >= {mistral_threshold})")
+    
+    # 2. Vérifier les mots interdits
+    if flag_config.get('forbidden_words_trigger_red', True):
+        if moderation_details.get('forbidden_words_applied') or moderation_details.get('mistral_api_applied'):
+            forbidden_count = len(moderation_details.get('forbidden_words_applied', [])) + len(moderation_details.get('mistral_api_applied', []))
+            reasons.append(f"Mots interdits détectés ({forbidden_count} mot(s))")
+    
+    # 3. Vérifier les noms propres (RGPD)
+    if flag_config.get('proper_names_trigger_red', True):
+        if moderation_details.get('proper_names_applied'):
+            names_count = len(moderation_details.get('proper_names_applied', []))
+            reasons.append(f"Noms propres détectés ({names_count} nom(s)) - RGPD")
+    
+    # 4. Vérifier si le texte a été modifié
+    if flag_config.get('text_modification_trigger_red', True):
+        if original_text != moderated_text:
+            reasons.append("Texte modifié pendant la modération")
+    
+    # Déterminer le flag final
+    if reasons:
+        return "RED", reasons
+    else:
+        return "GREEN", ["Aucun problème détecté"]
+
+# Charger les mots interdits et la configuration au démarrage
 FORBIDDEN_WORDS = load_forbidden_words()
+FLAG_CONFIG = load_flag_config()
 
 def check_moderation_api(text, threshold=DEFAULT_MODERATION_THRESHOLD):
     """
@@ -145,7 +252,7 @@ def moderate_text(text, moderation_threshold=DEFAULT_MODERATION_THRESHOLD):
         moderation_threshold (float): Seuil de modération entre 0.1 et 1.0
     
     Returns:
-        tuple: (moderated_text, api_result, moderation_details)
+        tuple: (moderated_text, api_result, moderation_details, flag, flag_reasons)
     """
     # Vérifier via l'API Mistral
     should_moderate, api_result = check_moderation_api(text, moderation_threshold)
@@ -276,7 +383,10 @@ def moderate_text(text, moderation_threshold=DEFAULT_MODERATION_THRESHOLD):
     if text_before_names != moderated_text:
         moderation_details['sources'].append('Détection de noms propres')
     
-    return moderated_text, api_result, moderation_details
+    # Déterminer le flag RED/GREEN
+    flag, flag_reasons = determine_flag(api_result, moderation_details, text, moderated_text, FLAG_CONFIG)
+    
+    return moderated_text, api_result, moderation_details, flag, flag_reasons
 
 @app.route('/moderate', methods=['POST'])
 def moderate():
@@ -300,7 +410,7 @@ def moderate():
         # S'assurer que le seuil est dans la plage valide
         threshold = max(0.1, min(1.0, threshold))
         
-        moderated_text, api_result, moderation_details = moderate_text(original_text, threshold)
+        moderated_text, api_result, moderation_details, flag, flag_reasons = moderate_text(original_text, threshold)
         
         # Si le texte a été modifié, c'est qu'il y a eu modération
         is_moderated = moderated_text != original_text
@@ -312,7 +422,9 @@ def moderate():
             'is_moderated': is_moderated,
             'moderation_threshold': threshold,
             'api_result': api_result,
-            'moderation_details': moderation_details
+            'moderation_details': moderation_details,
+            'flag': flag,
+            'flag_reasons': flag_reasons
         })
     
     except Exception as e:
@@ -386,6 +498,79 @@ def get_forbidden_words():
     
     except Exception as e:
         logger.error(f"Erreur lors de la récupération des mots interdits: {str(e)}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': f"Erreur serveur: {str(e)}"
+        }), 500
+
+@app.route('/get_flag_config', methods=['GET'])
+def get_flag_config():
+    """
+    Récupère la configuration des seuils de flags
+    """
+    try:
+        # Recharger depuis le fichier pour s'assurer d'avoir les données à jour
+        current_config = load_flag_config()
+        
+        return jsonify({
+            'status': 'success',
+            'flag_config': current_config
+        })
+    
+    except Exception as e:
+        logger.error(f"Erreur lors de la récupération de la configuration des flags: {str(e)}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': f"Erreur serveur: {str(e)}"
+        }), 500
+
+@app.route('/update_flag_config', methods=['POST'])
+def update_flag_config():
+    """
+    Met à jour la configuration des seuils de flags
+    """
+    try:
+        data = request.json
+        
+        if not data or 'flag_config' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'Le champ "flag_config" est requis'
+            }), 400
+        
+        new_config = data['flag_config']
+        
+        # Validation des valeurs
+        if 'mistral_api_score_threshold' in new_config:
+            threshold = float(new_config['mistral_api_score_threshold'])
+            if not (0.0 <= threshold <= 1.0):
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Le seuil API Mistral doit être entre 0.0 et 1.0'
+                }), 400
+        
+        # Mettre à jour la configuration en mémoire
+        global FLAG_CONFIG
+        FLAG_CONFIG.update(new_config)
+        
+        # Sauvegarder dans le fichier
+        save_success = save_flag_config(FLAG_CONFIG)
+        
+        if save_success:
+            return jsonify({
+                'status': 'success',
+                'message': 'Configuration des flags mise à jour avec succès',
+                'current_config': FLAG_CONFIG
+            })
+        else:
+            return jsonify({
+                'status': 'warning',
+                'message': 'Configuration mise à jour en mémoire mais non sauvegardée dans le fichier',
+                'current_config': FLAG_CONFIG
+            })
+    
+    except Exception as e:
+        logger.error(f"Erreur lors de la mise à jour de la configuration des flags: {str(e)}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': f"Erreur serveur: {str(e)}"
